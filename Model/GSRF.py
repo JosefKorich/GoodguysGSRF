@@ -16,8 +16,12 @@ Run (recommended):
 
 from __future__ import annotations
 
+import os
 import warnings
 from typing import Dict, Tuple
+
+# Use 1 job in restricted envs (Cursor/sandbox); use all cores otherwise
+N_JOBS = int(os.environ.get("GSRF_N_JOBS", "1"))
 
 import numpy as np
 import pandas as pd
@@ -31,10 +35,12 @@ from sklearn.model_selection import GridSearchCV, KFold, cross_val_predict
 # Helpers
 # -----------------------------
 def load_inputs() -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    athletes_df = pd.read_excel("summerOly_athletes.xlsx")
-    medals_df = pd.read_excel("summerOly_medal_counts.xlsx")
-    programs_df = pd.read_excel("summerOly_programs.xlsx")
-    hosts_df = pd.read_csv("summerOly_hosts.csv")
+    # Data files live in Data/ relative to project root; use paths that work when run from project root
+    data_dir = "Data"
+    athletes_df = pd.read_excel(f"{data_dir}/summerOly_athletes.xlsx")
+    medals_df = pd.read_excel(f"{data_dir}/summerOly_medal_counts.xlsx")
+    programs_df = pd.read_excel(f"{data_dir}/summerOly_programs.xlsx")
+    hosts_df = pd.read_csv(f"{data_dir}/summerOly_hosts.csv")
     return athletes_df, medals_df, programs_df, hosts_df
 
 
@@ -170,7 +176,7 @@ def main() -> None:
         "min_samples_leaf": [1, 2],
     }
 
-    rf = RandomForestRegressor(random_state=42, n_jobs=-1)
+    rf = RandomForestRegressor(random_state=42, n_jobs=N_JOBS)
     cv = KFold(n_splits=10, shuffle=True, random_state=42)
 
     print("\nFitting Gold model (GridSearchCV)...")
@@ -179,7 +185,7 @@ def main() -> None:
         param_grid,
         cv=cv,
         scoring="neg_mean_squared_error",
-        n_jobs=-1,
+        n_jobs=N_JOBS,
         verbose=0,
     )
     grid_gold.fit(X, y_gold)
@@ -192,7 +198,7 @@ def main() -> None:
         param_grid,
         cv=cv,
         scoring="neg_mean_squared_error",
-        n_jobs=-1,
+        n_jobs=N_JOBS,
         verbose=0,
     )
     grid_total.fit(X, y_total)
@@ -201,8 +207,8 @@ def main() -> None:
 
     # Cross-validated performance (out-of-fold predictions)
     print("\nCross-validated evaluation (out-of-fold predictions)...")
-    pred_gold_cv = cross_val_predict(best_gold_model, X, y_gold, cv=cv, n_jobs=-1)
-    pred_total_cv = cross_val_predict(best_total_model, X, y_total, cv=cv, n_jobs=-1)
+    pred_gold_cv = cross_val_predict(best_gold_model, X, y_gold, cv=cv, n_jobs=N_JOBS)
+    pred_total_cv = cross_val_predict(best_total_model, X, y_total, cv=cv, n_jobs=N_JOBS)
 
     r2_gold = r2_score(y_gold, pred_gold_cv)
     mae_gold = mean_absolute_error(y_gold, pred_gold_cv)
