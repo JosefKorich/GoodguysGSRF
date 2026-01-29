@@ -8,6 +8,7 @@ Uses shared preprocessed data; writes outputs to Output/ and a changelog.
 
 from __future__ import annotations
 
+import argparse
 import sys
 import warnings
 from pathlib import Path
@@ -26,7 +27,7 @@ from sklearn.model_selection import GridSearchCV, KFold, cross_val_predict
 
 warnings.filterwarnings("ignore", category=UserWarning)
 
-# Project root and data dir (run from project root: python Model/run_paper_pipeline.py)
+# Project root (run from project root: python Model/run_paper_pipeline.py)
 ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = str(ROOT / "Data")
 OUT_DIR = str(ROOT / "Output")
@@ -34,8 +35,15 @@ sys.path.insert(0, str(ROOT / "Model"))
 from preprocess_paper import run_preprocessing, standardize
 
 
-def _ensure_out():
-    Path(OUT_DIR).mkdir(parents=True, exist_ok=True)
+def _ensure_out(out_dir: str) -> None:
+    Path(out_dir).mkdir(parents=True, exist_ok=True)
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Paper-faithful Olympic medals pipeline (GSRF, Logistic, Sports, Lasso, Sensitivity).")
+    parser.add_argument("--data_dir", type=str, default=None, help=f"Data directory (default: {ROOT / 'Data'})")
+    parser.add_argument("--output_dir", type=str, default=None, help=f"Output directory for CSVs (default: {ROOT / 'Output'})")
+    return parser.parse_args()
 
 
 # ---------- Task 1: GSRF (paper §5) ----------
@@ -337,7 +345,10 @@ def task4_lasso(prep: dict, task1: dict, task3: dict) -> dict:
 
 
 # ---------- Sensitivity (paper §10) ----------
-# ps = |Δy/y|; vary A_ij and E_ij; report athletes_num: 0.058329%; Total event: -1.2113%
+# ps = |Δy/y|; vary A_ij and E_ij in RAW space (paper: athletes_num 0.058329%; Total event -1.2113%)
+
+# Small fractional change in raw space (paper reports very small %; 1% raw perturbation)
+SENSITIVITY_PERTURB_PCT = 0.01  # 1% increase in raw A_ij and E_ij
 
 def task_sensitivity(task1: dict, prep: dict) -> dict:
     t1 = task1
@@ -345,28 +356,40 @@ def task_sensitivity(task1: dict, prep: dict) -> dict:
     data = prep["data"]
     base = data[data["Year"] == 2024].copy()
     feats = t1["feat_t"]
-    X_base = (base[feats] - t1["mu_t"]) / t1["sd_t"].replace(0, 1)
+    mu_t, sd_t = t1["mu_t"], t1["sd_t"].replace(0, 1)
+    # Baseline: standardize raw 2024 features and predict
+    X_base = (base[feats].copy() - mu_t) / sd_t
     y_base = model.predict(X_base)
-    # Perturb A_ij (+small %), E_ij (+small %)
-    X_a = X_base.copy()
-    X_a["Athletes"] = X_base["Athletes"] + 0.01  # 1% shift in standardized units ≈ small % in raw
+    # Perturb in RAW space: A_ij * (1 + pct), E_ij * (1 + pct), then standardize and predict
+    base_raw = base[feats].copy()
+    base_a = base_raw.copy()
+    base_a["Athletes"] = base_raw["Athletes"] * (1 + SENSITIVITY_PERTURB_PCT)
+    X_a = (base_a - mu_t) / sd_t
     y_a = model.predict(X_a)
-    X_e = X_base.copy()
-    X_e["EventsTotal"] = X_base["EventsTotal"] + 0.01
+    base_e = base_raw.copy()
+    base_e["EventsTotal"] = base_raw["EventsTotal"] * (1 + SENSITIVITY_PERTURB_PCT)
+    X_e = (base_e - mu_t) / sd_t
     y_e = model.predict(X_e)
-    dy_a = np.abs(y_a - y_base)
-    dy_e = np.abs(y_e - y_base)
-    ps_a = np.mean(dy_a / (y_base + 1e-9)) * 100
-    ps_e = np.mean(dy_e / (y_base + 1e-9)) * 100
-    return {"athletes_num_pct": ps_a, "total_event_pct": ps_e}
+    y_safe = np.maximum(y_base, 1e-9)
+    # Paper Eq (20): ps = |Δy/y|; average over countries
+    ps_a = np.mean(np.abs((y_a - y_base) / y_safe)) * 100
+    ps_e_signed = np.mean((y_e - y_base) / y_safe) * 100  # paper reports Total event -1.2113%
+    ps_e_abs = np.mean(np.abs((y_e - y_base) / y_safe)) * 100
+    return {
+        "athletes_num_pct": ps_a,
+        "total_event_pct": ps_e_signed,
+        "total_event_pct_abs": ps_e_abs,
+    }
 
 
 # ---------- Main ----------
 
-def main():
-    _ensure_out()
+def main(data_dir: str | None = None, output_dir: str | None = None) -> dict:
+    data_dir = data_dir or DATA_DIR
+    output_dir = output_dir or OUT_DIR
+    _ensure_out(output_dir)
     print("Preprocessing (paper §4)...")
-    prep = run_preprocessing(DATA_DIR)
+    prep = run_preprocessing(data_dir)
     print("Task 1: GSRF...")
     task1 = task1_gsrf(prep)
     print("Task 2: Logistic...")
@@ -379,13 +402,13 @@ def main():
     sens = task_sensitivity(task1, prep)
 
     # Write outputs
-    task1["pred_2028"].to_csv(f"{OUT_DIR}/predictions_2028.csv", index=False)
-    task1["progress"].to_csv(f"{OUT_DIR}/progress_regression_2028.csv", index=False)
+    task1["pred_2028"].to_csv(f"{output_dir}/predictions_2028.csv", index=False)
+    task1["progress"].to_csv(f"{output_dir}/progress_regression_2028.csv", index=False)
     if not task2["table11"].empty:
-        task2["table11"].to_csv(f"{OUT_DIR}/table11_nonmedal_probabilities.csv", index=False)
+        task2["table11"].to_csv(f"{output_dir}/table11_nonmedal_probabilities.csv", index=False)
     if not task3["table12"].empty:
-        task3["table12"].to_csv(f"{OUT_DIR}/table12_countries_sports.csv", index=False)
-    task4["table15"].to_csv(f"{OUT_DIR}/table15_great_coach_2028.csv", index=False)
+        task3["table12"].to_csv(f"{output_dir}/table12_countries_sports.csv", index=False)
+    task4["table15"].to_csv(f"{output_dir}/table15_great_coach_2028.csv", index=False)
 
     # Console summary
     print("\n--- Task 1 Gold (Table 3 style) ---")
@@ -400,11 +423,12 @@ def main():
     print(task1["pred_2028"].sort_values("PredictedTotal2028", ascending=False).head(11).to_string(index=False))
     print("\n--- Task 2 Table 11 (p>0.2) ---")
     print(task2["table11"].to_string(index=False))
-    print("\n--- Sensitivity ---")
-    print(f"athletes_num: {sens['athletes_num_pct']:.4f}%; Total event: {sens['total_event_pct']:.4f}%")
+    print("\n--- Sensitivity (raw-space 1% perturbation; ps = |Δy/y|) ---")
+    print(f"athletes_num: {sens['athletes_num_pct']:.4f}%; Total event (signed): {sens['total_event_pct']:.4f}%")
 
-    return prep, task1, task2, task3, task4, sens
+    return {"prep": prep, "task1": task1, "task2": task2, "task3": task3, "task4": task4, "sens": sens}
 
 
 if __name__ == "__main__":
-    main()
+    args = parse_args()
+    main(data_dir=args.data_dir, output_dir=args.output_dir)
