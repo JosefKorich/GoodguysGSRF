@@ -12,7 +12,7 @@ This document gives a **complete rundown** of how outputs from **`run_paper_pipe
 - **Task 2 (Table 11):** Same five NOCs (LBN, GUM, PLE, ANG, ESA); **probabilities differ** — pipeline LBN 0.8462, GUM 0.8493, PLE 0.8563, ANG 0.8092, ESA 0.8477 vs paper 0.290, 0.230, 0.220, 0.206, 0.201.
 - **Task 3 (Table 12):** Same NOCs and “top sports” structure; **medal counts differ** (data/period/aggregation).
 - **Task 4 (Table 15):** **Exact match** — 0→5.33, 6→8.86, 3→36.65.
-- **Sensitivity:** Formula **matches** (ps = |Δy/y|); pipeline reports **athletes_num: 11.0759%; Total event: 0.0000%** (paper: 0.058329%; −1.2113%).
+- **Sensitivity:** Formula **matches** (ps = |Δy/y|, raw-space 1% perturbation); pipeline reports **athletes_num: 0.7185%; Total event (signed): 0.0000%** (paper: 0.058329%; −1.2113%).
 
 ---
 
@@ -187,10 +187,10 @@ This document gives a **complete rundown** of how outputs from **`run_paper_pipe
 
 | Quantity       | Paper    | Paper-pipeline |
 |----------------|----------|-----------------|
-| athletes_num   | 0.058329%| **11.0759%**    |
-| Total event    | −1.2113% | **0.0000%**     |
+| athletes_num        | 0.058329%| **0.7185%**    |
+| Total event (signed)| −1.2113% | **0.0000%**    |
 
-Sensitivity is computed as ps = |Δy/y| (Eq 20) with perturbations to A_ij and E_ij. The pipeline’s values (11.0759%, 0.0000%) differ from the paper’s (0.058329%, −1.2113%) because perturbation size, baseline (2024 features), and standardization differ. Same *definition* (Eq 20); *numerical levels* do not match.
+Sensitivity is computed as ps = |Δy/y| (Eq 20) with perturbations to A_ij and E_ij. The pipeline’s values (0.7185%, 0.0000%) differ from the paper’s (0.058329%, −1.2113%) with 1% raw-space perturbation; athletes value is much closer than earlier ~11%. Same *definition* (Eq 20); *numerical levels* still differ.
 
 ---
 
@@ -207,7 +207,7 @@ Sensitivity is computed as ps = |Δy/y| (Eq 20) with perturbations to A_ij and E
 | **Task 2 Table 11** | LBN 0.290, GUM 0.230, PLE 0.220, ANG 0.206, ESA 0.201 | LBN 0.8462, GUM 0.8493, PLE 0.8563, ANG 0.8092, ESA 0.8477 | Same five NOCs; probs much higher in pipeline |
 | **Task 3 Table 12**  | USA/CHN/JPN/KOR/AUS/GBR + sports | Same NOCs + top sports (counts differ) | Structure match; counts differ |
 | **Task 4 Table 15**  | 0→5.33, 6→8.86, 3→36.65  | 0→5.33, 6→8.86, 3→36.65          | Full match      |
-| **Sensitivity**     | athletes_num: 0.058329%; Total event: −1.2113% | athletes_num: **11.0759%**; Total event: **0.0000%** | Definition match (Eq 20); numbers differ |
+| **Sensitivity**     | athletes_num: 0.058329%; Total event: −1.2113% | athletes_num: **0.7185%**; Total event (signed): **0.0000%** | Definition match (Eq 20); athletes closer after 1% raw perturbation |
 
 ---
 
