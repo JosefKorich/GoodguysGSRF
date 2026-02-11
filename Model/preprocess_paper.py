@@ -184,6 +184,80 @@ def build_cumulative_medals(medals_clean: pd.DataFrame) -> Tuple[pd.DataFrame, p
     return pd.DataFrame(rows_g), pd.DataFrame(rows_t)
 
 
+def compute_ema_medals(medals_df: pd.DataFrame, alpha: float = 0.3) -> pd.DataFrame:
+    """
+    Compute exponential moving average of medal counts.
+
+    Args:
+        medals_df: DataFrame with columns [Year, Team, Gold, Silver, Bronze, Total]
+        alpha: Smoothing factor (0 < alpha <= 1)
+               Higher alpha = more weight on recent performance
+               Common choices: 0.2 (slow), 0.3 (moderate), 0.4 (fast)
+
+    Returns:
+        DataFrame with columns [Year, Team, EMA_Gold, EMA_Total]
+
+    Notes:
+        EMA is computed in chronological order for each team.
+        First year for each team uses actual medal count as initialization.
+        Captures momentum/decline that cumulative metrics miss.
+    """
+    m = medals_df[~medals_df["Year"].isin([1916, 1940, 1944])].copy()
+    ema_results = []
+
+    for team in sorted(m["Team"].unique()):
+        team_data = m[m["Team"] == team].sort_values("Year").copy()
+
+        ema_gold = None
+        ema_total = None
+
+        for _, row in team_data.iterrows():
+            year = int(row["Year"])
+            gold = float(row.get("Gold", 0) or 0)
+            total = float(row.get("Total", 0) or 0)
+
+            if ema_gold is None:
+                ema_gold = gold
+                ema_total = total
+            else:
+                ema_gold = alpha * gold + (1 - alpha) * ema_gold
+                ema_total = alpha * total + (1 - alpha) * ema_total
+
+            ema_results.append({
+                "Year": year,
+                "Team": team,
+                "EMA_Gold": ema_gold,
+                "EMA_Total": ema_total,
+            })
+
+    return pd.DataFrame(ema_results)
+
+
+def compute_ema_for_multiple_alphas(
+    medals_df: pd.DataFrame,
+    alphas: list = (0.1, 0.2, 0.3, 0.4, 0.5),
+) -> Dict[float, pd.DataFrame]:
+    """
+    Compute EMA for multiple alpha values for sensitivity analysis.
+
+    Args:
+        medals_df: DataFrame with medal counts
+        alphas: List of alpha values to test
+
+    Returns:
+        Dictionary mapping alpha -> DataFrame with EMA columns
+    """
+    ema_dict = {}
+    for alpha in alphas:
+        ema_df = compute_ema_medals(medals_df, alpha=alpha)
+        ema_df = ema_df.rename(columns={
+            "EMA_Gold": f"EMA_Gold_a{int(alpha * 10)}",
+            "EMA_Total": f"EMA_Total_a{int(alpha * 10)}",
+        })
+        ema_dict[alpha] = ema_df
+    return ema_dict
+
+
 def standardize(X: pd.DataFrame, fit_df: pd.DataFrame | None = None) -> Tuple[pd.DataFrame, object]:
     """Eq (0): x' = (x - x̄) / SD. Returns (X_std, (means, stds)) for inverse."""
     if fit_df is None:
@@ -222,8 +296,20 @@ def run_preprocessing(
     data["EventsTotal"] = data["EventsTotal"].fillna(0)
     data = data[~data["Year"].isin([1916, 1940, 1944])]
 
+    # Compute EMA for multiple alphas (for sensitivity analysis)
+    alphas = [0.1, 0.2, 0.3, 0.4, 0.5]
+    ema_dict = compute_ema_for_multiple_alphas(medals_clean, alphas)
+
+    # Merge default alpha=0.3 EMA into main data
+    ema_default = compute_ema_medals(medals_clean, alpha=0.3)
+    data = data.merge(ema_default, on=["Year", "Team"], how="left")
+    data["EMA_Gold"] = data["EMA_Gold"].fillna(0.0)
+    data["EMA_Total"] = data["EMA_Total"].fillna(0.0)
+
     return {
         "data": data,
+        "ema_dict": ema_dict,
+        "ema_default": ema_default,
         "athletes_clean": athletes_clean,
         "medals_clean": medals_clean,
         "athlete_counts": athlete_counts,
