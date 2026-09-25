@@ -1,115 +1,133 @@
-# GSRF Model — Olympic Medal Prediction
+# Olympic Medal Forecasting with Recency-Aware Machine Learning
 
-A reproducible pipeline for predicting Summer Olympic medal standings, implementing the methodology from the paper **"Olympic Medals Unveiled: A Mathematical Exploration of Achievement Trends"** (MCM/ICM 2025, Problem C). The project uses a **Grid-Search Random Forest (GSRF)** model for gold and total medal prediction, plus logistic regression for first-time medal probability, sport importance analysis, and a Lasso-based "Great Coach" effect model.
+A reproducible quantitative forecasting pipeline for **Summer Olympic medal counts**. The project first reproduces the Grid-Search Random Forest (GSRF) framework from an MCM/ICM 2025 Problem C paper, then extends it with **recency-weighted features, out-of-time validation, Poisson count modeling, and sensitivity analysis**.
 
-## Features
+> **Project context.** This was completed as a collaborative academic modeling project. The baseline methodology is reproduced from the referenced MCM/ICM paper; the recency-aware EMA/Hybrid specifications, robustness analysis, and Poisson extension are subsequent modeling extensions in this repository.
 
-- **Task 1 — GSRF**: Predicts gold and total medals using athlete counts, cumulative medals (G_ij, T_ij), total events, and host indicator. Train on pre-2024 data, test on 2024; 10-fold CV; 95% prediction intervals; 2028 projections (Los Angeles).
-- **Task 2 — Logistic**: Classifies never-medal countries into likely/not-likely to win a first medal in 2028 (Table 11: countries with p > 0.2).
-- **Task 3 — Sports**: Country–sport medal importance (I_j = m_k/M_k); Table 12-style breakdown for USA, CHN, JPN, KOR, AUS, GBR.
-- **Task 4 — Lasso “Great Coach”**: Points-based model (Gold×10, Silver×6, Bronze×3); Table 15 projections for CHN Women’s Volleyball, BRA Women’s Soccer, ROU Women’s Gymnastics.
-- **Sensitivity (§10)**: 1% perturbation in athletes and total events; reports relative change in predictions.
+## Why this project is interesting
 
-## Requirements
+Olympic performance is a non-stationary forecasting problem: delegation size, host effects, event availability, long-run national strength, and recent momentum all change over time. A cumulative-history model can overweight results from decades ago, so this project explicitly tests whether **recent performance should receive more weight**.
 
-- Python 3.9+
-- See `requirements.txt`:
+The workflow is deliberately structured like a small quantitative research pipeline:
 
+1. construct country–Olympics panel data;
+2. engineer historical and participation features;
+3. train models only on information available before the test Olympics;
+4. hold out **2024 as an out-of-time test set**;
+5. compare competing specifications;
+6. run hyperparameter and sensitivity analysis;
+7. generate forward-looking 2028 forecasts.
+
+## Methods
+
+### 1. Baseline GSRF reproduction
+
+Separate `RandomForestRegressor` models forecast **gold medals** and **total medals** using:
+
+- athlete/delegation count,
+- cumulative historical medal counts,
+- total Olympic events,
+- host-country indicator.
+
+Hyperparameters are selected using `GridSearchCV`, with cross-validation performed on pre-2024 data.
+
+### 2. Recency-aware historical signals
+
+The enhanced pipeline replaces the assumption that all historical Olympics are equally informative with **exponential moving-average (EMA)** features.
+
+Three specifications are compared:
+
+- **Cumulative** — long-run medal history only;
+- **EMA** — recency-weighted history only;
+- **Hybrid** — both cumulative and EMA signals.
+
+The EMA decay parameter alpha is stress-tested across multiple values rather than selected from a single arbitrary choice.
+
+### 3. First-time medal modeling
+
+For countries with no prior medals, the enhanced pipeline uses **Poisson regression** to model medal counts from participation-based covariates. The fitted expected count lambda is converted into a probability of winning at least one medal:
+
+`P(Y >= 1) = 1 - exp(-lambda)`
+
+The repository also contains the paper-faithful logistic-regression implementation for comparison.
+
+### 4. Sport attribution and coaching model
+
+Additional components reproduce the paper's:
+
+- country–sport medal-importance analysis;
+- Lasso-regularized **"Great Coach"** model;
+- perturbation-based sensitivity analysis.
+
+## Out-of-time results
+
+Using **2024 as the held-out test Olympics**, the recency-aware models materially improve predictive performance relative to the cumulative baseline.
+
+| Target | Model | Test R² | MAE |
+|---|---:|---:|---:|
+| Gold medals | Hybrid | **0.948** | **0.404** |
+| Total medals | Hybrid | **0.979** | **0.703** |
+
+The EMA-only specification also outperformed the cumulative baseline, supporting the hypothesis that **recent Olympic performance contains incremental predictive signal**. Alpha-sensitivity and k-fold experiments are saved under `Output_Enhanced/`.
+
+These are historical holdout results, not guarantees of future forecasting accuracy.
+
+## Repository structure
+
+```text
+.
+├── Data/                         # Olympic source data
+├── Model/
+│   ├── preprocess_paper.py
+│   ├── GSRF.py
+│   ├── run_paper_pipeline.py
+│   ├── run_paper_pipeline_enhanced.py
+│   ├── model_comparison.py
+│   ├── alpha_sensitivity.py
+│   ├── kfold_sensitivity.py
+│   ├── poisson_medal_count.py
+│   ├── LassoRegression.py
+│   └── sensitivity.py
+├── Output/                       # Baseline outputs
+├── Output_Enhanced/              # Enhanced-model diagnostics and forecasts
+├── Markdowns/                    # Reproduction and methodology notes
+├── verify_pipeline.py
+├── verify_enhanced_pipeline.py
+└── requirements.txt
 ```
-pandas>=2.0
-openpyxl>=3.0
-scikit-learn>=1.0
-scipy>=1.9
-numpy>=1.21
-```
 
-## Installation
+## Reproduce the analysis
 
-From the project root:
+### Setup
 
 ```bash
-# Optional: use a virtual environment
 python -m venv .venv
-source .venv/bin/activate   # Windows: .venv\Scripts\activate
-
+source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-## Data
-
-Place the following files in the `Data/` directory:
-
-| File | Description |
-|------|-------------|
-| `summerOly_athletes.xlsx` | Athlete-level data (NOC, Year, Sport, Event, Medal, etc.) |
-| `summerOly_medal_counts.xlsx` | Country-year medal counts (Gold, Silver, Bronze, Total) |
-| `summerOly_programs.xlsx` | Events per year (sport/discipline × year) |
-| `summerOly_hosts.csv` | Host country per Olympic year |
-
-Preprocessing (§4) excludes AIN, URS, and RUS; standardizes features per Eq (0); and builds merged country-year inputs for the models.
-
-## Usage
-
-**Run the full paper-faithful pipeline** (preprocessing → Task 1 → Task 2 → Task 3 → Task 4 → sensitivity). From the project root:
+### Paper-faithful pipeline
 
 ```bash
 python Model/run_paper_pipeline.py
+python verify_pipeline.py
 ```
 
-Optional arguments:
+### Enhanced pipeline
 
 ```bash
-python Model/run_paper_pipeline.py --data_dir Data --output_dir Output
+python Model/run_paper_pipeline_enhanced.py
+python verify_enhanced_pipeline.py
 ```
 
-**Verify outputs** (exclusions, USA in top 10, Table 15 values):
+The enhanced pipeline writes model comparisons, alpha/k-fold sensitivity tables, feature importances, Poisson first-medal estimates, and 2028 forecasts to `Output_Enhanced/`.
 
-```bash
-python verify_pipeline.py [--data_dir Data] [--output_dir Output]
-```
+## Selected techniques
 
-**Standalone GSRF script** (Task 1 only, no paper tables):
+`Python` · `pandas` · `NumPy` · `scikit-learn` · `Random Forests` · `Grid Search` · `Cross-Validation` · `Time-Weighted Features` · `Poisson Regression` · `Logistic Regression` · `Lasso` · `Feature Importance` · `Sensitivity Analysis` · `Out-of-Time Validation`
 
-```bash
-cd Model && python GSRF.py
-```
+## Attribution
 
-## Project Structure
+The baseline reproduction follows the methodology of **"Olympic Medals Unveiled: A Mathematical Exploration of Achievement Trends"** (MCM/ICM 2025, Problem C). The repository contains reproduction notes under `Markdowns/` and clearly separates the paper-faithful pipeline from the enhanced modeling pipeline.
 
-```
-├── Data/                    # Input data (athletes, medals, programs, hosts)
-├── Model/
-│   ├── run_paper_pipeline.py   # Main pipeline (preprocess + Tasks 1–4 + sensitivity)
-│   ├── preprocess_paper.py     # Paper §4 preprocessing
-│   ├── GSRF.py                 # Standalone GSRF medal prediction
-│   ├── LassoRegression.py      # Lasso / Great Coach components
-│   ├── Regression.py           # Regression utilities
-│   ├── Medalchart.py           # Medal chart helpers
-│   └── sensitivity.py          # Sensitivity analysis
-├── Output/                  # Generated CSVs (predictions, tables)
-├── Markdowns/               # Paper and analysis notes (e.g. olympic_medals_paper.md)
-├── requirements.txt
-├── verify_pipeline.py       # Checks preprocessing and key outputs
-└── README.md
-```
-
-## Outputs
-
-After running the pipeline, `Output/` contains:
-
-| File | Description |
-|------|-------------|
-| `predictions_2028.csv` | 2028 gold/total predictions and 95% intervals by country |
-| `progress_regression_2028.csv` | Change vs 2024 (delta gold/total) for progress/regress view |
-| `table11_nonmedal_probabilities.csv` | Never-medal countries with medal probability > 0.2 |
-| `table12_countries_sports.csv` | Top sports by medals for selected countries |
-| `table15_great_coach_2028.csv` | Great Coach 2024→2028 score projections (CHN, BRA, ROU) |
-
-## References
-
-- Methodology and task descriptions: `Markdowns/olympic_medals_paper.md`
-- Reproducibility notes: `changelog.md`, `Markdowns/model_reproduction_analysis.md`
-
-## License
-
-For academic use in connection with MCM/ICM 2025 Problem C.
+This repository is intended as an academic modeling and reproducibility project.
